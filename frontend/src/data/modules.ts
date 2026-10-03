@@ -1,19 +1,46 @@
-import type { ModuleMeta } from './types'
+import type { MetricSpec, ModuleMeta } from './types'
 
 // 模块元数据由仓库生成时写入：字段、状态、动作、流转目标都在这里，页面不再各自写一遍。
+// 归属站点 / 观测时间 / 提交动作也集中声明，local-service 据此做统一的归属与状态校验。
+
+type ModuleInput = Omit<
+  ModuleMeta,
+  'metricSpecs' | 'pendingStatuses' | 'abnormalStatuses'
+> & {
+  pendingStatuses: string[]
+  abnormalStatuses: string[]
+  metricSpecs?: MetricSpec[]
+}
+
+function defineModule(input: ModuleInput): ModuleMeta {
+  // 默认三张指标卡：总数、待处理、异常；需要业务化命名的模块再显式传 metricSpecs。
+  const metricSpecs: MetricSpec[] = input.metricSpecs ?? [
+    { label: `${input.entity}总数`, kind: 'total' },
+    { label: '待处理', kind: 'pending' },
+    { label: '异常', kind: 'abnormal' },
+  ]
+  return { ...input, metricSpecs }
+}
+
 export const MODULES: ModuleMeta[] = [
-  {
+  defineModule({
     key: "station",
     name: "监测站点",
     entity: "水文监测站",
     desc: "维护水文监测站，围绕站点编号、站点名称、站点类型、所在河流做登记、筛选与状态流转。",
-    fields: ["站点编号", "站点名称", "站点类型", "所在河流", "经纬度坐标", "建站年份", "管理单位", "运行状态"],
+    fields: ["站点编号", "站点名称", "站点类型", "所在河流", "经纬度坐标", "建站年份", "管理单位", "运行状态", "停用时间"],
     statuses: ["正常运行", "设备故障", "汛期加强", "暂停运行", "已撤销"],
     actions: ["升级为加强", "登记故障", "撤销站点"],
     actionTargets: {"升级为加强": "汛期加强", "登记故障": "设备故障", "撤销站点": "已撤销"},
-    metrics: ["站点总数", "正常运行数", "故障站点数"],
-  },
-  {
+    pendingStatuses: ["暂停运行"],
+    abnormalStatuses: ["设备故障"],
+    metricSpecs: [
+      { label: "站点总数", kind: "total" },
+      { label: "正常运行数", kind: "status", status: "正常运行" },
+      { label: "故障站点数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "waterlevel",
     name: "水位监测",
     entity: "水位记录",
@@ -22,9 +49,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已采集", "待审核", "已通过", "异常值"],
     actions: ["提交审核", "确认通过", "标记异常"],
     actionTargets: {"提交审核": "待审核", "确认通过": "已通过", "标记异常": "异常值"},
-    metrics: ["今日采集数", "超警戒站次", "待审核记录"],
-  },
-  {
+    pendingStatuses: ["已采集", "待审核"],
+    abnormalStatuses: ["异常值"],
+    stationField: "站点编号",
+    timeField: "观测时间",
+    submitActions: ["提交审核"],
+    metricSpecs: [
+      { label: "采集总数", kind: "total" },
+      { label: "待审核记录", kind: "pending" },
+      { label: "异常记录数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "discharge",
     name: "流量监测",
     entity: "流量记录",
@@ -33,9 +69,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已采集", "待审核", "已通过", "异常值"],
     actions: ["提交审核", "确认通过", "标记异常"],
     actionTargets: {"提交审核": "待审核", "确认通过": "已通过", "标记异常": "异常值"},
-    metrics: ["今日测量次数", "待审核记录", "异常记录数"],
-  },
-  {
+    pendingStatuses: ["已采集", "待审核"],
+    abnormalStatuses: ["异常值"],
+    stationField: "站点编号",
+    timeField: "测量时间",
+    submitActions: ["提交审核"],
+    metricSpecs: [
+      { label: "测量次数", kind: "total" },
+      { label: "待审核记录", kind: "pending" },
+      { label: "异常记录数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "rainfall",
     name: "雨量观测",
     entity: "雨量记录",
@@ -44,9 +89,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已采集", "待审核", "已通过", "异常值"],
     actions: ["提交审核", "确认通过", "标记异常"],
     actionTargets: {"提交审核": "待审核", "确认通过": "已通过", "标记异常": "异常值"},
-    metrics: ["今日观测站次", "暴雨站点数", "待审核记录"],
-  },
-  {
+    pendingStatuses: ["已采集", "待审核"],
+    abnormalStatuses: ["异常值"],
+    stationField: "站点编号",
+    timeField: "观测时段",
+    submitActions: ["提交审核"],
+    metricSpecs: [
+      { label: "观测站次", kind: "total" },
+      { label: "待审核记录", kind: "pending" },
+      { label: "异常记录数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "waterquality",
     name: "水质检测",
     entity: "水质检测报告",
@@ -55,9 +109,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已采样", "检测中", "已出报告", "超标", "已复核"],
     actions: ["开始检测", "出具报告", "发起复核"],
     actionTargets: {"开始检测": "检测中", "出具报告": "已出报告", "发起复核": "已复核"},
-    metrics: ["本月检测次数", "超标报告数", "检测中样本"],
-  },
-  {
+    pendingStatuses: ["已采样", "检测中"],
+    abnormalStatuses: ["超标"],
+    stationField: "采样站点",
+    timeField: "采样时间",
+    submitActions: ["开始检测"],
+    metricSpecs: [
+      { label: "本月检测次数", kind: "total" },
+      { label: "检测中样本", kind: "pending" },
+      { label: "超标报告数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "crosssection",
     name: "断面测量",
     entity: "断面测量记录",
@@ -66,9 +129,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已测量", "待校核", "已校核", "需重测"],
     actions: ["提交校核", "确认校核", "安排重测"],
     actionTargets: {"提交校核": "待校核", "确认校核": "已校核", "安排重测": "需重测"},
-    metrics: ["本月测量次数", "待校核记录", "需重测记录"],
-  },
-  {
+    pendingStatuses: ["已测量", "待校核"],
+    abnormalStatuses: ["需重测"],
+    stationField: "站点编号",
+    timeField: "测量日期",
+    submitActions: ["提交校核"],
+    metricSpecs: [
+      { label: "本月测量次数", kind: "total" },
+      { label: "待校核记录", kind: "pending" },
+      { label: "需重测记录", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "telemetry",
     name: "遥测设备",
     entity: "遥测设备",
@@ -77,9 +149,16 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["正常运行", "信号异常", "低电量", "待维修", "已停用"],
     actions: ["报修设备", "确认修复", "停用设备"],
     actionTargets: {"报修设备": "待维修", "确认修复": "正常运行", "停用设备": "已停用"},
-    metrics: ["设备总数", "正常运行数", "待维修数"],
-  },
-  {
+    pendingStatuses: ["信号异常", "低电量", "待维修"],
+    abnormalStatuses: ["信号异常", "待维修"],
+    stationField: "所属站点",
+    metricSpecs: [
+      { label: "设备总数", kind: "total" },
+      { label: "待维修数", kind: "pending" },
+      { label: "异常设备数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "compilation",
     name: "数据整编",
     entity: "整编成果",
@@ -88,9 +167,16 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["待整编", "整编中", "待审核", "已刊印", "已驳回"],
     actions: ["开始整编", "提交审核", "驳回整编"],
     actionTargets: {"开始整编": "整编中", "提交审核": "待审核", "驳回整编": "已驳回"},
-    metrics: ["待整编年度", "整编中年度", "已刊印成果"],
-  },
-  {
+    pendingStatuses: ["待整编", "整编中", "待审核"],
+    abnormalStatuses: ["已驳回"],
+    stationField: "站点编号",
+    metricSpecs: [
+      { label: "整编成果总数", kind: "total" },
+      { label: "整编中年度", kind: "pending" },
+      { label: "已刊印成果", kind: "total" },
+    ],
+  }),
+  defineModule({
     key: "warning",
     name: "预警阈值",
     entity: "预警阈值配置",
@@ -99,9 +185,16 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["草稿", "已生效", "已调整", "已停用"],
     actions: ["发布生效", "调整阈值", "停用配置"],
     actionTargets: {"发布生效": "已生效", "调整阈值": "已调整", "停用配置": "已停用"},
-    metrics: ["配置总数", "已生效数", "本月调整数"],
-  },
-  {
+    pendingStatuses: ["草稿"],
+    abnormalStatuses: [],
+    stationField: "站点编号",
+    metricSpecs: [
+      { label: "配置总数", kind: "total" },
+      { label: "已生效数", kind: "total" },
+      { label: "本月调整数", kind: "total" },
+    ],
+  }),
+  defineModule({
     key: "groundwater",
     name: "地下水观测",
     entity: "地下水观测记录",
@@ -110,9 +203,15 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已采集", "待审核", "已通过", "异常值"],
     actions: ["提交审核", "确认通过", "标记异常"],
     actionTargets: {"提交审核": "待审核", "确认通过": "已通过", "标记异常": "异常值"},
-    metrics: ["今日观测井次", "待审核记录", "异常记录数"],
-  },
-  {
+    pendingStatuses: ["已采集", "待审核"],
+    abnormalStatuses: ["异常值"],
+    metricSpecs: [
+      { label: "今日观测井次", kind: "total" },
+      { label: "待审核记录", kind: "pending" },
+      { label: "异常记录数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "evaporation",
     name: "蒸发观测",
     entity: "蒸发观测记录",
@@ -121,9 +220,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已采集", "待审核", "已通过", "异常值"],
     actions: ["提交审核", "确认通过", "标记异常"],
     actionTargets: {"提交审核": "待审核", "确认通过": "已通过", "标记异常": "异常值"},
-    metrics: ["今日观测站次", "待审核记录", "异常记录数"],
-  },
-  {
+    pendingStatuses: ["已采集", "待审核"],
+    abnormalStatuses: ["异常值"],
+    stationField: "站点编号",
+    timeField: "观测日期",
+    submitActions: ["提交审核"],
+    metricSpecs: [
+      { label: "今日观测站次", kind: "total" },
+      { label: "待审核记录", kind: "pending" },
+      { label: "异常记录数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "cableway",
     name: "测流缆道",
     entity: "测流缆道",
@@ -132,9 +240,16 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["正常运行", "需检修", "检修中", "已停用"],
     actions: ["安排检修", "完成检修", "停用缆道"],
     actionTargets: {"安排检修": "需检修", "完成检修": "正常运行", "停用缆道": "已停用"},
-    metrics: ["缆道总数", "正常运行数", "需检修数"],
-  },
-  {
+    pendingStatuses: ["需检修", "检修中"],
+    abnormalStatuses: ["需检修"],
+    stationField: "所属站点",
+    metricSpecs: [
+      { label: "缆道总数", kind: "total" },
+      { label: "待检修数", kind: "pending" },
+      { label: "异常缆道数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "sediment",
     name: "泥沙监测",
     entity: "泥沙监测记录",
@@ -143,9 +258,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已采集", "待审核", "已通过", "异常值"],
     actions: ["提交审核", "确认通过", "标记异常"],
     actionTargets: {"提交审核": "待审核", "确认通过": "已通过", "标记异常": "异常值"},
-    metrics: ["本月采样次数", "待审核记录", "异常记录数"],
-  },
-  {
+    pendingStatuses: ["已采集", "待审核"],
+    abnormalStatuses: ["异常值"],
+    stationField: "站点编号",
+    timeField: "采样时间",
+    submitActions: ["提交审核"],
+    metricSpecs: [
+      { label: "本月采样次数", kind: "total" },
+      { label: "待审核记录", kind: "pending" },
+      { label: "异常记录数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "communication",
     name: "通讯系统",
     entity: "通讯设备",
@@ -154,9 +278,16 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["通讯正常", "信号弱", "通讯中断", "待更换"],
     actions: ["登记故障", "确认恢复", "申请更换"],
     actionTargets: {"登记故障": "通讯中断", "确认恢复": "通讯正常", "申请更换": "待更换"},
-    metrics: ["设备总数", "通讯正常数", "中断设备数"],
-  },
-  {
+    pendingStatuses: ["信号弱", "通讯中断", "待更换"],
+    abnormalStatuses: ["通讯中断", "待更换"],
+    stationField: "所属站点",
+    metricSpecs: [
+      { label: "设备总数", kind: "total" },
+      { label: "待恢复数", kind: "pending" },
+      { label: "中断设备数", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "stationhouse",
     name: "站房维护",
     entity: "站房维护记录",
@@ -165,9 +296,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["待安排", "已安排", "施工中", "已完成", "已验收"],
     actions: ["安排维护", "确认完工", "通过验收"],
     actionTargets: {"安排维护": "已安排", "确认完工": "已完成", "通过验收": "已验收"},
-    metrics: ["待维护项数", "施工中项数", "本月已验收"],
-  },
-  {
+    pendingStatuses: ["待安排", "已安排", "施工中"],
+    abnormalStatuses: [],
+    stationField: "站点编号",
+    timeField: "维护日期",
+    submitActions: ["安排维护"],
+    metricSpecs: [
+      { label: "维护记录总数", kind: "total" },
+      { label: "待维护项数", kind: "pending" },
+      { label: "施工中项数", kind: "pending" },
+    ],
+  }),
+  defineModule({
     key: "calibration",
     name: "仪器检定",
     entity: "仪器检定记录",
@@ -176,9 +316,15 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["待送检", "送检中", "已合格", "不合格", "已停用"],
     actions: ["送出检定", "确认合格", "标记不合格"],
     actionTargets: {"送出检定": "送检中", "确认合格": "已合格", "标记不合格": "不合格"},
-    metrics: ["待送检仪器", "已合格仪器", "不合格仪器"],
-  },
-  {
+    pendingStatuses: ["待送检", "送检中"],
+    abnormalStatuses: ["不合格"],
+    metricSpecs: [
+      { label: "待送检仪器", kind: "pending" },
+      { label: "已合格仪器", kind: "total" },
+      { label: "不合格仪器", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "inspection",
     name: "巡检记录",
     entity: "巡检记录",
@@ -187,9 +333,18 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["待巡检", "已巡检", "发现故障", "已处置"],
     actions: ["完成巡检", "报告故障", "确认处置"],
     actionTargets: {"完成巡检": "已巡检", "报告故障": "发现故障", "确认处置": "已处置"},
-    metrics: ["本月巡检次数", "已巡检站点", "待处置故障"],
-  },
-  {
+    pendingStatuses: ["待巡检", "发现故障"],
+    abnormalStatuses: ["发现故障"],
+    stationField: "站点编号",
+    timeField: "巡检日期",
+    submitActions: ["完成巡检", "报告故障"],
+    metricSpecs: [
+      { label: "本月巡检次数", kind: "total" },
+      { label: "待巡检站点", kind: "pending" },
+      { label: "待处置故障", kind: "abnormal" },
+    ],
+  }),
+  defineModule({
     key: "plan",
     name: "测报方案",
     entity: "测报方案",
@@ -198,8 +353,14 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["编制中", "待审批", "已批准", "已修订", "已废止"],
     actions: ["提交审批", "批准方案", "废止方案"],
     actionTargets: {"提交审批": "待审批", "批准方案": "已批准", "废止方案": "已废止"},
-    metrics: ["方案总数", "已批准方案", "待审批方案"],
-  },
+    pendingStatuses: ["编制中", "待审批"],
+    abnormalStatuses: [],
+    metricSpecs: [
+      { label: "方案总数", kind: "total" },
+      { label: "已批准方案", kind: "total" },
+      { label: "待审批方案", kind: "pending" },
+    ],
+  }),
 ]
 
 export const MODULE_BY_KEY: Map<string, ModuleMeta> = new Map(

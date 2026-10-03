@@ -43,7 +43,14 @@
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td v-for="column in columns" :key="column">
+            <RouterLink
+              v-if="column === codeField"
+              class="link"
+              :to="`/station/${row.id}`"
+            >{{ row[column] ?? '—' }}</RouterLink>
+            <template v-else>{{ row[column] ?? '—' }}</template>
+          </td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
@@ -51,6 +58,8 @@
               :key="action"
               class="link"
               type="button"
+              :disabled="!actionAllowed(row, action)"
+              :title="actionAllowed(row, action) ? '' : guardHint(action)"
               @click="runAction(action, row)"
             >
               {{ action }}
@@ -71,21 +80,30 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
+  computeStats,
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { subscribe } from '@/data/local-store'
+import {
+  STATION_ACTION_GUARDS,
+  STATION_CODE_FIELD,
+} from '@/data/domain'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('station')
-const columns = ["站点编号", "站点名称", "站点类型", "所在河流", "经纬度坐标", "建站年份", "管理单位", "运行状态"]
-const actions = ["升级为加强", "登记故障", "撤销站点"]
-const statuses = ["正常运行", "设备故障", "汛期加强", "暂停运行", "已撤销"]
-const stats = [{"label": "站点总数", "value": 0}, {"label": "正常运行数", "value": 0}, {"label": "故障站点数", "value": 0}]
+const columns = meta.fields
+const actions = meta.actions
+const statuses = meta.statuses
+const codeField = STATION_CODE_FIELD
+const stats = computed(() =>
+  computeStats(meta).map((value, index) => ({ label: meta.metricSpecs[index].label, value })),
+)
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -98,6 +116,16 @@ const statusSummary = computed(() =>
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+// 与服务层 STATION_ACTION_GUARDS 同一口径：不满足起始状态的动作直接置灰，提交时仍会再校验一次。
+function actionAllowed(row: EntryRow, action: string): boolean {
+  const guard = STATION_ACTION_GUARDS[action]
+  return guard ? guard.from.includes(String(row.status)) : true
+}
+
+function guardHint(action: string): string {
+  return STATION_ACTION_GUARDS[action]?.blocked ?? '当前状态不可执行该动作'
+}
 
 function resetFilters() {
   filters.value = {}
@@ -112,14 +140,20 @@ function openCreate() {
   errorMessage.value = '水文监测站登记入口尚未接入审批流'
 }
 
-function runAction(action: string, row: EntryRow) {
+async function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
-    return
+  try {
+    const result = await applyAction(meta.key, Number(row.id), action)
+    if (!result.ok) {
+      errorMessage.value = result.message
+      return
+    }
+    reload()
+  } catch (error) {
+    // 持久化失败时数据层已整体回滚：重读列表，保持与站点详情、运营概览一致
+    errorMessage.value = error instanceof Error ? error.message : '操作失败，已回退到操作前状态'
+    reload()
   }
-  reload()
 }
 
 function reload() {
@@ -133,5 +167,13 @@ function reload() {
   }
 }
 
-onMounted(reload)
+let unsubscribe: (() => void) | undefined
+
+onMounted(() => {
+  reload()
+  // 撤销/提交并发落盘或异常回退后，列表随数据版本自动重读
+  unsubscribe = subscribe(() => reload())
+})
+
+onUnmounted(() => unsubscribe?.())
 </script>

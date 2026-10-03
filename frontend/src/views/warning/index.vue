@@ -71,21 +71,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
+  computeStats,
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { subscribe } from '@/data/local-store'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('warning')
 const columns = ["配置编号", "站点编号", "监测类型", "蓝色阈值", "黄色阈值", "橙色阈值", "红色阈值", "生效状态"]
 const actions = ["发布生效", "调整阈值", "停用配置"]
 const statuses = ["草稿", "已生效", "已调整", "已停用"]
-const stats = [{"label": "配置总数", "value": 0}, {"label": "已生效数", "value": 0}, {"label": "本月调整数", "value": 0}]
+const stats = computed(() =>
+  computeStats(meta).map((value, index) => ({ label: meta.metricSpecs[index].label, value })),
+)
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -112,14 +116,20 @@ function openCreate() {
   errorMessage.value = '预警阈值配置登记入口尚未接入审批流'
 }
 
-function runAction(action: string, row: EntryRow) {
+async function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
-    return
+  try {
+    const result = await applyAction(meta.key, Number(row.id), action)
+    if (!result.ok) {
+      errorMessage.value = result.message
+      return
+    }
+    reload()
+  } catch (error) {
+    // 写盘失败等异常：数据层已整体回退，这里重读保证列表与详情/概览一致
+    errorMessage.value = error instanceof Error ? error.message : '操作失败，已回退到操作前状态'
+    reload()
   }
-  reload()
 }
 
 function reload() {
@@ -133,5 +143,12 @@ function reload() {
   }
 }
 
-onMounted(reload)
+let unsubscribe: (() => void) | undefined
+
+onMounted(() => {
+  reload()
+  unsubscribe = subscribe(() => reload())
+})
+
+onUnmounted(() => unsubscribe?.())
 </script>

@@ -66,6 +66,31 @@ npm run build
 - 每个模块的页面在 `frontend/src/views/<模块>/index.vue`，页面只负责渲染，读写统一走
   `frontend/src/api/local-service.ts`。
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
-  `frontend/src/data/seed.ts`。
+  `frontend/src/data/seed.ts`；站点状态口径、河流→管理单位映射在 `frontend/src/data/domain.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
-- 想回到初始数据：清掉浏览器里 `hydrology-monitor-station:entries` 这一项，或调用 `resetModule(模块)`。
+- 想回到初始数据：清掉浏览器里 `hydrology-monitor-station:entries:v2` 这一项，或调用
+  `resetModule(模块)`；旧版无版本号键（`hydrology-monitor-station:entries`）首次加载时自动迁移。
+
+## 站点归属与状态口径
+
+- 各监测记录通过模块元数据里的 `stationField` 归属到监测站点（如「站点编号」「所属站点」「采样站点」），
+  `timeField` 用于区分历史观测与新观测，`submitActions` 声明会产生新数据的提交动作。
+- 提交类动作（提交审核、完成巡检、安排维护等）统一校验：站点必须存在；站点已撤销/暂停时，
+  仅允许补录「停用时间」之前的历史观测，之后的新观测一律拒绝。审核、通过、标记异常等
+  对存量记录的处理动作不受影响。
+- 站点动作有起始状态护栏：撤销只能从运行态（正常运行/设备故障/汛期加强）发起，已撤销不能重复撤销。
+- 列表指标卡、站点详情、运营概览全部通过 `computeStats` / 模块声明的 `pendingStatuses`、
+  `abnormalStatuses` 取数，不再信任记录行上可能失真的布尔标志；站点表「运行状态」字段是
+  `status` 的镜像，动作流转时强制同步。
+- 老站点缺少管理单位时，按所在河流回填流域管理单位（长江/黄河/淮河/海河/珠江/松辽水利委员会、
+  太湖流域管理局，匹配不到时兜底为省水文水资源勘测局）。
+- 所有动作经单任务队列串行执行，配合整份快照事务落盘：并发撤销与提交只有一个结果落盘；
+  写盘失败时内存快照整体回滚并通过订阅通知列表、详情、运营概览一起重读。
+
+## 数据链路自检
+
+```bash
+cd frontend
+node -e "require('esbuild').build({entryPoints:['scripts/verify-data-flow.ts'],bundle:true,platform:'node',format:'esm',write:false}).then(r=>require('fs').writeFileSync('/tmp/verify.mjs',r.outputFiles[0].text))" && node /tmp/verify.mjs
+```
+

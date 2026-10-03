@@ -71,21 +71,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
+  computeStats,
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { subscribe } from '@/data/local-store'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('communication')
 const columns = ["设备编号", "设备类型", "所属站点", "通讯协议", "信号强度", "最近通讯时刻", "维护人员", "设备状态"]
 const actions = ["登记故障", "确认恢复", "申请更换"]
 const statuses = ["通讯正常", "信号弱", "通讯中断", "待更换"]
-const stats = [{"label": "设备总数", "value": 0}, {"label": "通讯正常数", "value": 0}, {"label": "中断设备数", "value": 0}]
+const stats = computed(() =>
+  computeStats(meta).map((value, index) => ({ label: meta.metricSpecs[index].label, value })),
+)
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -112,14 +116,20 @@ function openCreate() {
   errorMessage.value = '通讯设备登记入口尚未接入审批流'
 }
 
-function runAction(action: string, row: EntryRow) {
+async function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
-    return
+  try {
+    const result = await applyAction(meta.key, Number(row.id), action)
+    if (!result.ok) {
+      errorMessage.value = result.message
+      return
+    }
+    reload()
+  } catch (error) {
+    // 写盘失败等异常：数据层已整体回退，这里重读保证列表与详情/概览一致
+    errorMessage.value = error instanceof Error ? error.message : '操作失败，已回退到操作前状态'
+    reload()
   }
-  reload()
 }
 
 function reload() {
@@ -133,5 +143,12 @@ function reload() {
   }
 }
 
-onMounted(reload)
+let unsubscribe: (() => void) | undefined
+
+onMounted(() => {
+  reload()
+  unsubscribe = subscribe(() => reload())
+})
+
+onUnmounted(() => unsubscribe?.())
 </script>

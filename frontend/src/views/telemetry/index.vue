@@ -71,21 +71,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
+  computeStats,
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { subscribe } from '@/data/local-store'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('telemetry')
 const columns = ["设备编号", "设备类型", "所属站点", "通讯方式", "安装日期", "最近维护日", "电池余量", "设备状态"]
 const actions = ["报修设备", "确认修复", "停用设备"]
 const statuses = ["正常运行", "信号异常", "低电量", "待维修", "已停用"]
-const stats = [{"label": "设备总数", "value": 0}, {"label": "正常运行数", "value": 0}, {"label": "待维修数", "value": 0}]
+const stats = computed(() =>
+  computeStats(meta).map((value, index) => ({ label: meta.metricSpecs[index].label, value })),
+)
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -112,14 +116,20 @@ function openCreate() {
   errorMessage.value = '遥测设备登记入口尚未接入审批流'
 }
 
-function runAction(action: string, row: EntryRow) {
+async function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
-    return
+  try {
+    const result = await applyAction(meta.key, Number(row.id), action)
+    if (!result.ok) {
+      errorMessage.value = result.message
+      return
+    }
+    reload()
+  } catch (error) {
+    // 写盘失败等异常：数据层已整体回退，这里重读保证列表与详情/概览一致
+    errorMessage.value = error instanceof Error ? error.message : '操作失败，已回退到操作前状态'
+    reload()
   }
-  reload()
 }
 
 function reload() {
@@ -133,5 +143,12 @@ function reload() {
   }
 }
 
-onMounted(reload)
+let unsubscribe: (() => void) | undefined
+
+onMounted(() => {
+  reload()
+  unsubscribe = subscribe(() => reload())
+})
+
+onUnmounted(() => unsubscribe?.())
 </script>

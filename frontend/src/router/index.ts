@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import Dashboard from '@/views/Dashboard.vue'
 const Station = () => import('@/views/station/index.vue')
+const StationDetail = () => import('@/views/station/detail.vue')
 const Waterlevel = () => import('@/views/waterlevel/index.vue')
 const Discharge = () => import('@/views/discharge/index.vue')
 const Rainfall = () => import('@/views/rainfall/index.vue')
@@ -25,6 +26,7 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'dashboard', component: Dashboard },
     { path: '/station', name: 'station', component: Station },
+    { path: '/station/:id', name: 'station-detail', component: StationDetail },
     { path: '/waterlevel', name: 'waterlevel', component: Waterlevel },
     { path: '/discharge', name: 'discharge', component: Discharge },
     { path: '/rainfall', name: 'rainfall', component: Rainfall },
